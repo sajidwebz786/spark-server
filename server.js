@@ -5,6 +5,7 @@ import { installLifecycle } from './lifecycle.mjs';
 import { enhanceTraining, gradeWeeklyTest } from './training.mjs';
 import { requireRecruitable, requireActiveEmployee, requireAssessmentOrder, nextCode } from './workflow-guards.mjs';
 import { canReadMail, attachmentBytes } from './mail-access.mjs';
+import { databaseConfig } from './database-config.mjs';
 import express from 'express';
 import cors from 'cors';
 import { Sequelize, DataTypes, Op } from 'sequelize';
@@ -45,16 +46,17 @@ app.use('/uploads', express.static(uploadDir));
 
 const allowedOrigins = [
   ...(process.env.CLIENT_URLS || process.env.CLIENT_URL || '').split(','),
+  process.env.RENDER_EXTERNAL_URL,
   'https://hrms.infolinx.com',
   'https://www.hrms.infolinx.com',
   'http://localhost:5173',
   'http://localhost:5174'
 ]
+  .filter(Boolean)
   .map((origin) => origin.trim().replace(/\/$/, ''))
   .filter((origin, index, origins) => origin && origins.indexOf(origin) === index);
 
 console.log('[CORS] allowedOrigins =', allowedOrigins);
-console.log('[CORS] CLIENT_URLS env =', process.env.CLIENT_URLS);
 
 app.use((req, res, next) => {
   const origin = req.headers.origin;
@@ -79,20 +81,14 @@ app.use((req, res, next) => {
 
 app.use(express.json({ limit: "10mb" }));
 
-const dbSslEnabled = /^(true|1|require)$/i.test(process.env.DB_SSL || '');
-const dbDialectOptions = dbSslEnabled ? { ssl: { require: true, rejectUnauthorized: false } } : {};
-const sequelizeOptions = {
-  dialect: process.env.DB_DIALECT || 'postgres',
-  dialectOptions: dbDialectOptions,
-  logging: false
-};
+const { url: databaseUrl, options: sequelizeOptions } = databaseConfig();
 
 if (/^dpg-.+-a$/i.test(process.env.DB_HOST || '') && !process.env.DATABASE_URL) {
   console.warn('DB_HOST looks like a Render internal hostname. Use Render External Database URL locally, or run this API inside Render.');
 }
 
-const sequelize = process.env.DATABASE_URL
-  ? new Sequelize(process.env.DATABASE_URL, sequelizeOptions)
+const sequelize = databaseUrl
+  ? new Sequelize(databaseUrl, sequelizeOptions)
   : new Sequelize(process.env.DB_NAME, process.env.DB_USER, process.env.DB_PASSWORD, {
       ...sequelizeOptions,
       host: process.env.DB_HOST,
