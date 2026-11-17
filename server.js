@@ -47,6 +47,8 @@ app.use('/uploads', express.static(uploadDir));
 const allowedOrigins = [
   ...(process.env.CLIENT_URLS || process.env.CLIENT_URL || '').split(','),
   process.env.RENDER_EXTERNAL_URL,
+  'https://www.sparkinfosol.com',
+  'https://sparkinfosol.com',
   'https://hrms.infolinx.com',
   'https://www.hrms.infolinx.com',
   'http://localhost:5173',

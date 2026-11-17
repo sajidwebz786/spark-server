@@ -3,6 +3,13 @@ import assert from 'node:assert/strict';
 import { createGoogleMail, googleMailSender, googleMailError } from './google-mail.mjs';
 import { mailPreviewHtml } from '../web-portal/src/mail-preview.mjs';
 
+test('invalid signing credentials return actionable errors without exposing assertions', () => {
+  const failure = googleMailError(new Error('invalid_grant: Invalid signature for token: eyJ.secret.signature'));
+  assert.equal(failure.statusCode, 502);
+  assert.match(failure.message, /same active service-account JSON key/);
+  assert.doesNotMatch(failure.message, /eyJ|secret/);
+});
+
 test('delegation errors describe both scopes and return a gateway failure', () => {
   const failure = googleMailError(new Error('unauthorized_client: access denied'));
   assert.equal(failure.statusCode, 502);

@@ -9,6 +9,14 @@ export function googleMailSender(env = process.env) {
 
 export function googleMailError(error) {
   const reason = [error.message, error.response?.data?.error, error.response?.data?.error_description].filter(value => typeof value === 'string').join(' ');
+  if (/invalid_grant/i.test(reason)) {
+    const signature = /signature/i.test(reason);
+    const failure = new Error(signature
+      ? 'Google mail signing key was rejected. Configure GOOGLE_CLIENT_EMAIL and GOOGLE_PRIVATE_KEY from the same active service-account JSON key, or replace GOOGLE_SERVICE_ACCOUNT_FILE with that complete JSON file. Check that the key is enabled in Google Cloud, then restart the backend.'
+      : 'Google mail authentication failed (invalid_grant). Check the service-account credentials, impersonated Workspace mailbox and server clock, then restart the backend.');
+    failure.statusCode = 502;
+    return failure;
+  }
   if (!/unauthorized_client/.test(reason)) return error;
   const failure = new Error('Google Workspace authorization failed. In Admin Console > Security > API controls > Domain-wide delegation, authorize the service account numeric client ID for BOTH https://www.googleapis.com/auth/gmail.send and https://www.googleapis.com/auth/gmail.readonly. Enable domain-wide delegation on the service account and confirm GOOGLE_MAIL_SENDER is an active, licensed Workspace Gmail mailbox.', { cause: error });
   failure.statusCode = 502;
