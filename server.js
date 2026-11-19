@@ -24,6 +24,7 @@ const app = express();
 
 const serverDir = path.dirname(fileURLToPath(import.meta.url));
 dotenv.config({ path: path.join(serverDir, '.env') });
+process.env.MAIL_MODE ||= process.env.MAIL_PROVIDER;
 const googleMail = createGoogleMail({ serverDir });
 const mailSender = process.env.MAIL_MODE === 'google' ? googleMailSender() : (process.env.MAIL_FROM || process.env.MAIL_USER || process.env.SMTP_USER);
 const port = process.env.PORT || 5000;
@@ -1040,6 +1041,8 @@ async function normalizeDemoEmails() {
 }
 
 async function ensureRecruitmentDemoData() {
+  // Demo fixtures must never run against operational records.
+  if (process.env.HRMS_DEMO_DATA !== 'true' || process.env.NODE_ENV === 'production' || process.env.RENDER) return;
   const jdDefinitions = [
     ['Senior React Engineer', 'Product Engineering', 'Hyderabad / Remote', 4, 3, ['React', 'Node.js', 'PostgreSQL', 'REST', 'Testing']],
     ['Node.js API Developer', 'Platform Engineering', 'Hyderabad', 3, 2, ['Node.js', 'Express', 'PostgreSQL', 'Sequelize', 'JWT']],
@@ -1163,8 +1166,7 @@ async function ensureRecruitmentDemoData() {
       shortlistScore,
       JobDescriptionId: jobsByTitle[roleApplied].id
     };
-    if (existing) await existing.update(payload);
-    else await Candidate.create(payload);
+    if (!existing) await Candidate.create(payload);
   }
 
   const legacyMailReplacements = [
@@ -2081,7 +2083,7 @@ async function ensureAttendanceSamples(employee) {
 }
 
 async function seed() {
-  await normalizeDemoEmails();
+  if (process.env.HRMS_DEMO_DATA === 'true' && process.env.NODE_ENV !== 'production' && !process.env.RENDER) await normalizeDemoEmails();
   const adminEmail = mailSender || process.env.MAIL_FROM || process.env.MS_GRAPH_MAIL_USER_ID || process.env.MS_GRAPH_USER_ID || 'Info@infolinx.com';
   const legacyAdmin = await User.findOne({ where: { email: 'admin@company.com' } });
   if (legacyAdmin && legacyAdmin.email !== adminEmail) await legacyAdmin.update({ email: adminEmail, name: 'HR Admin' });
@@ -2248,9 +2250,24 @@ app.post('/api/candidates', asyncRoute(async (req, res) => {
 app.patch('/api/candidates/:id', asyncRoute(async (req, res) => {
   const candidate = await Candidate.findByPk(req.params.id);
   if (!candidate) return res.status(404).json({ message: 'Candidate not found' });
+  if ('email' in req.body && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(req.body.email || '')) return res.status(400).json({ message: 'A valid candidate email is required.' });
+  if ('name' in req.body && !String(req.body.name || '').trim()) return res.status(400).json({ message: 'Candidate name is required.' });
+  if ('skills' in req.body && (!Array.isArray(req.body.skills) || !req.body.skills.length)) return res.status(400).json({ message: 'At least one skill is required.' });
   const permitted = ['name', 'email', 'phone', 'skills', 'experienceYears', 'roleApplied', 'JobDescriptionId', 'cvUrl', 'currentCompany', 'currentCtc', 'expectedCtc', 'noticePeriod', 'linkedin', 'github', 'source', 'notes'];
   if (req.body.status && req.body.status !== candidate.status) return res.status(409).json({ message: 'Candidate status is managed by interview, document, offer and induction actions.' });
   res.json(await candidate.update(Object.fromEntries(Object.entries(req.body).filter(([key]) => permitted.includes(key)))));
+}));
+app.get('/api/candidates/:id', asyncRoute(async (req, res) => {
+  const candidate = await Candidate.findByPk(req.params.id, { include: [JobDescription] });
+  if (!candidate) return res.status(404).json({ message: 'Candidate not found.' });
+  res.json(candidate);
+}));
+app.delete('/api/candidates/:id', asyncRoute(async (req, res) => {
+  const candidate = await Candidate.findByPk(req.params.id);
+  if (!candidate) return res.status(404).json({ message: 'Candidate not found.' });
+  if (candidate.status === 'Inducted') return res.status(409).json({ message: 'An inducted employee cannot be deleted from recruitment.' });
+  await candidate.update({ status: 'Archived' });
+  res.json({ message: 'Candidate archived.' });
 }));
 app.post('/api/candidates/:id/action', asyncRoute(async (req, res) => {
   const candidate = await Candidate.findByPk(req.params.id, { include: [JobDescription] });
